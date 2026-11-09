@@ -40,7 +40,8 @@ class WaterPartsTest {
         FallingWaterParameters w = FallingWaterParameters.DEFAULTS;
         for (float bad : new float[] {-0.5f, 5f}) {
             for (Supplier<Object> make : java.util.List.<Supplier<Object>>of(() -> w.withOpacity(bad),
-                () -> w.withRoughness(bad), () -> w.withEdge(bad), () -> w.withAtomising(bad))) {
+                () -> w.withRoughness(bad), () -> w.withEdge(bad), () -> w.withAtomising(bad), () -> w.withVeil(bad),
+                () -> w.withJetOpacity(bad))) {
                 assertThatThrownBy(make::get).isInstanceOf(IllegalArgumentException.class);
             }
         }

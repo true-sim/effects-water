@@ -44,7 +44,7 @@ public final class WaterRenderSettings {
     public static final Setting<Float> WIND_DIRECTION = Setting.decimal("water.render.windDirection", 60, 0, 360,
         "where the wind blows towards, degrees from north, clockwise");
     /** How far a veil drifts. */
-    public static final Setting<Float> SWAY_DRIFT = Setting.decimal("water.render.swayDrift", 0.05f, 0, 1,
+    public static final Setting<Float> SWAY_DRIFT = Setting.decimal("water.render.swayDrift", 0.03f, 0, 1,
         "metres a falling veil drifts sideways per metre fallen, per metre a second of wind");
     /** How high above the water the banks are wet. */
     public static final Setting<Float> WET_HEIGHT = Setting.decimal("water.render.wetHeight", 0.7f, 0, 10,

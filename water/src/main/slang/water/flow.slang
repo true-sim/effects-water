@@ -31,8 +31,8 @@ public struct WaterFlowParameters
     public float streakScale = 0.35;      // falls: metres across a streak
     public float streakContrast = 0.45;   // falls: how much the streaks brighten and darken
     public float waves = 0.35;            // the standing waves' slope where the water is white
-    public float streakLength = 6;        // channels: foam streaks' length along the flow over their width
-    public float wetDarkening = 0.35;     // what wet ground's colour is multiplied by
+    public float streakLength = 3;        // channels: foam streaks' length along the flow over their width
+    public float wetDarkening = 0.22;     // what wet ground's colour is multiplied by
     public float wetGloss = 0.45;         // how much smoother wet ground turns (a share of its roughness)
     public float wetFade = 0.35;          // metres over which the wet band fades out at its top
     public uint64_t wetness = 0;          // the wetness map (WaterWetness), or 0: none
@@ -113,49 +113,76 @@ float wetness(uint64_t address, float3 w, float fade)
     return 1 - smoothstep(top - max(fade, 0.01), top, w.y);
 }
 
-/** A hash of a lattice point, 0 to 1. */
-float hash2(int2 c)
+/** PCG's 2D hash (Jarzynski and Olano 2020): two well-mixed words of a lattice point. */
+uint2 pcg2(int2 c)
 {
-    uint h = uint(c.x) * 0x8da6b343u ^ uint(c.y) * 0xd8163841u;
-    h ^= h >> 13;
-    h *= 0x5bd1e995u;
-    h ^= h >> 15;
-    return float(h & 0xffffu) / 65535.0;
+    uint2 v = uint2(c) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v = v ^ (v >> 16u);
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v = v ^ (v >> 16u);
+    return v;
 }
 
-/** Value noise at `x` (0 to 1) and its gradient (in .yz). */
+/** A unit gradient at a lattice point. */
+float2 gradientAt(int2 c)
+{
+    uint2 h = pcg2(c);
+    float a = float(h.x & 0xffffu) * (6.2831853 / 65536.0);
+    return float2(cos(a), sin(a));
+}
+
+/** Gradient noise at `x`, about -0.7 to 0.7, and its gradient (in .yz): no value noise's axis-aligned blocks. */
 float3 noiseGrad(float2 x)
 {
     float2 i = floor(x);
     float2 f = x - i;
-    float2 u = f * f * (3 - 2 * f);
-    float2 du = 6 * f * (1 - f);
+    float2 u = f * f * f * (f * (f * 6 - 15) + 10);
+    float2 du = 30 * f * f * (f * (f - 2) + 1);
     int2 c = int2(i);
-    float a = hash2(c);
-    float b = hash2(c + int2(1, 0));
-    float d = hash2(c + int2(0, 1));
-    float e = hash2(c + int2(1, 1));
-    float k1 = b - a;
-    float k2 = d - a;
-    float k3 = a - b - d + e;
-    float v = a + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
-    float2 g = du * float2(k1 + k3 * u.y, k2 + k3 * u.x);
+    float2 ga = gradientAt(c);
+    float2 gb = gradientAt(c + int2(1, 0));
+    float2 gc = gradientAt(c + int2(0, 1));
+    float2 gd = gradientAt(c + int2(1, 1));
+    float va = dot(ga, f);
+    float vb = dot(gb, f - float2(1, 0));
+    float vc = dot(gc, f - float2(0, 1));
+    float vd = dot(gd, f - float2(1, 1));
+    float v = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * (va - vb - vc + vd);
+    float2 g = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+        + du * (u.yx * (va - vb - vc + vd) + float2(vb, vc) - va);
     return float3(v, g);
 }
 
-/** Three octaves of value noise at `x`, -0.5 to 0.5 about, and its gradient. */
-float3 fbm(float2 x)
+/**
+ * Octaves of gradient noise at `x`, each turned by an irrational angle and scaled by an irrational ratio, so no
+ * octave's lattice lines up with another's and nothing repeats; the finer ones fade out as `detail` falls (0 to 1:
+ * how much of the fine detail the pixel can show). The value about -0.5 to 0.5, its gradient in .yz.
+ */
+float3 fbm(float2 x, float detail)
 {
     float3 sum = 0;
     float amplitude = 0.5;
     float scale = 1;
+    float2 p = x;
     [ForceUnroll]
-    for (int k = 0; k < 3; k++)
+    for (int k = 0; k < 4; k++)
     {
-        float3 n = noiseGrad(x * scale + float2(17.3 * k, 9.1 * k));
-        sum += float3((n.x - 0.5) * amplitude, n.yz * amplitude * scale);
-        amplitude *= 0.5;
-        scale *= 2.03;
+        float fade = k < 2 ? 1.0 : saturate(detail * 2 - (k - 2));
+        float3 n = noiseGrad(p * scale + float2(17.31 * k, 9.17 * k));
+        // the octave's gradient back in x's frame: p was turned by k times the angle
+        float angle = 0.7853982 * 1.61803 * k;
+        float c = cos(angle);
+        float si = sin(angle);
+        float2 g = float2(c * n.y + si * n.z, -si * n.y + c * n.z);
+        sum += float3(n.x * amplitude, g * amplitude * scale) * fade;
+        amplitude *= 0.52;
+        scale *= 1.93;
+        p = x;
+        float a2 = 0.7853982 * 1.61803 * (k + 1);
+        p = float2(cos(a2) * x.x - sin(a2) * x.y, sin(a2) * x.x + cos(a2) * x.y);
     }
     return sum;
 }
@@ -184,9 +211,12 @@ public struct WaterFlowHook : ISurfaceHook
         WaterFlow f = takeFlow(s);
         float time = params[0].time;
         float3 world = p.world();
+        // how much fine detail the pixel can show: the ripples' cell against the pixel's footprint at this distance
+        float distance = length(p.position);
+        float detail = saturate(1.5 - distance / (60 * max(params[0].rippleScale, 0.05)));
         if (f.kind == WATER_CHANNEL)
         {
-            channel(params, f, world, time, s);
+            channel(params, f, world, time, detail, distance, s);
         }
         else
         {
@@ -194,7 +224,8 @@ public struct WaterFlowHook : ISurfaceHook
         }
     }
 
-    static void channel(WaterFlowParameters* params, WaterFlow f, float3 world, float time, inout Surface s)
+    static void channel(WaterFlowParameters* params, WaterFlow f, float3 world, float time, float detail,
+        float distance, inout Surface s)
     {
         float scale = max(params[0].rippleScale, 0.05);
         float cycle = max(params[0].cycle, 0.1);
@@ -202,30 +233,36 @@ public struct WaterFlowHook : ISurfaceHook
         level = dot(level, level) > 1e-8 ? normalize(level) : float2(1, 0);
         float2 velocity = level * f.speed;
         // two phases half a cycle apart, each advected from its start and faded out before it stretches too far
-        float phase0 = frac(time / cycle);
-        float phase1 = frac(time / cycle + 0.5);
+        float offset = noiseGrad(world.xz / 23.7 + float2(41.3, 7.9)).x;
+        float phase0 = frac(time / cycle + offset);
+        float phase1 = frac(time / cycle + offset + 0.5);
         float w0 = 1 - abs(2 * phase0 - 1);
         float w1 = 1 - w0;
         float2 at = world.xz;
-        float3 r0 = fbm((at - velocity * (phase0 * cycle)) / scale);
-        float3 r1 = fbm((at - velocity * (phase1 * cycle)) / scale + float2(0.37, 0.71));
+        float3 r0 = fbm((at - velocity * (phase0 * cycle)) / scale, detail);
+        float3 r1 = fbm((at - velocity * (phase1 * cycle)) / scale + float2(37.7, 71.3), detail);
         // ripples stretched along the flow: across it the water's surface is rougher
         float2 gradient = (r0.yz * w0 + r1.yz * w1) / scale;
         float2 across = float2(-level.y, level.x);
         gradient = level * dot(gradient, level) * 0.6 + across * dot(gradient, across);
-        float slope = params[0].rippleSlope * sqrt(max(f.speed, 0.05)) * (0.5 + f.foam);
+        // the ripples' slope falls with distance as the pixel averages them (what is left is roughness)
+        float slope = params[0].rippleSlope * sqrt(max(f.speed, 0.05)) * (0.5 + f.foam) * (0.25 + 0.75 * detail);
+        s.roughness = lerp(s.roughness + 0.1 * (1 - detail), s.roughness, detail);
         float3 n = s.normal;
         float3 tilted = normalize(n - float3(gradient.x, 0, gradient.y) * slope);
         s.normal = dot(tilted, n) > 0.2 ? tilted : n;
         // standing waves where the water runs fast and white: crests across the flow, standing still, their
         // wavelength 2 pi v^2 / g (a gravity wave's that stands in the current), broken up by noise across
-        float white = smoothstep(0.25, 0.9, max(f.foam, f.speed / 4.5));
+        // only where the water is truly white: over stones, at steps, in fast broken water
+        float white = smoothstep(0.4, 0.95, f.foam) * smoothstep(1.2, 2.5, f.speed);
         float2 side = float2(-level.y, level.x);
         float along = dot(at, level);
         float acrossAt = dot(at, side);
         float wavelength = clamp(6.2831853 * f.speed * f.speed / 9.81, 0.4, 8.0);
-        float3 breakup = fbm(float2(along / (wavelength * 2), acrossAt / (wavelength * 1.2)) + float2(3.3, 1.9));
-        float crestPhase = 6.2831853 * along / wavelength + breakup.x * 4 + 0.6 * sin(time * 2.1 + acrossAt * 0.7);
+        float3 breakup = fbm(float2(along / (wavelength * 2), acrossAt / (wavelength * 1.2)) + float2(3.3, 1.9), 1);
+        // crests bent and broken by noise, in patches: no continuous lines across the river
+        float crestPhase = 6.2831853 * along / wavelength + breakup.x * 9 + 0.6 * sin(time * 2.1 + acrossAt * 0.7);
+        white *= smoothstep(-0.1, 0.25, breakup.x);
         float crest = 0.5 + 0.5 * sin(crestPhase);
         float waveSlope = params[0].waves * white * (0.6 + breakup.x);
         float3 waved = normalize(s.normal - float3(level.x, 0, level.y) * (cos(crestPhase) * waveSlope));
@@ -236,8 +273,8 @@ public struct WaterFlowHook : ISurfaceHook
         float stretch = max(params[0].streakLength, 1.0);
         float2 m0 = at - velocity * (phase0 * cycle);
         float2 m1 = at - velocity * (phase1 * cycle);
-        float3 c0 = fbm(float2(dot(m0, level) / (fs * stretch), dot(m0, side) / fs) + float2(5.1, 2.3));
-        float3 c1 = fbm(float2(dot(m1, level) / (fs * stretch), dot(m1, side) / fs) + float2(8.7, 4.4));
+        float3 c0 = fbm(float2(dot(m0, level) / (fs * stretch), dot(m0, side) / fs) + float2(5.1, 2.3), detail);
+        float3 c1 = fbm(float2(dot(m1, level) / (fs * stretch), dot(m1, side) / fs) + float2(8.7, 4.4), detail);
         float cells = 0.5 + c0.x * w0 + c1.x * w1;
         float carried = saturate(f.foam * params[0].foamCover);
         float patches = smoothstep(1 - carried, 1 - carried + 0.18, cells) * step(0.02, carried);
@@ -262,8 +299,8 @@ public struct WaterFlowHook : ISurfaceHook
         side = normalize(side);
         float a = dot(world.xz, side) / scale;
         float down = (world.y + time * max(f.speed, 1.0)) / (scale * 7);
-        float3 n = fbm(float2(a, down));
-        float3 m = fbm(float2(a * 0.37 + 11.0, down * 0.5 + time * 0.3));
+        float3 n = fbm(float2(a, down), 1);
+        float3 m = fbm(float2(a * 0.37 + 11.0, down * 0.5 + time * 0.3), 1);
         float streak = 0.5 + n.x + 0.5 * m.x;
         float contrast = params[0].streakContrast * (0.4 + 0.6 * f.foam);
         s.albedo *= 1 + (streak - 0.5) * 2 * contrast;

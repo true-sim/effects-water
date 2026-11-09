@@ -35,3 +35,11 @@ The falls' material (`waterfall`, GEOMETRY_DISPLACE) placed while still loading:
 placeholder (metallic-roughness, not displacing), and when the data arrived `Materials.set` threw "Material 2 is drawn
 by instances and did not displace" (WaterRenderTest). Rule: load the water's materials (`assets.acquire` until
 loaded) before `WaterScene.place` (the tests' `WaterRig.preload`).
+
+## A swaying veil showed horizontal steps (observation)
+
+With the sway displacing the falls' sheet by tens of metres (`swayDrift` 0.05, wind 2.5 m/s), the Staubbach's veil
+seen from its foot showed hard horizontal steps; with the wind at 0 it was smooth (WaterFilms' quick shot 1,
+2026-11-09). Neither the displacement mode (RASTER as COMPUTE) nor smoothing the fall path (common-procedural 0.11.2)
+changed them; drifting only away from the face with little sideways swing (`swayDrift` 0.03) leaves two faint
+lines. Cause not found: the sorted blend of a displaced, self-overlapping sheet's meshlets is suspected, not shown.

@@ -118,6 +118,9 @@ class WaterFilms {
         EngineSettings settings = new EngineSettings();
         settings.set(TerrainSettings.BUILD_BUDGET, 64);
         settings.set(WaterRenderSettings.MIST_DENSITY, 0.35f);
+        if (System.getenv("TRUESIM_FILM_CALM") != null) {
+            settings.set(WaterRenderSettings.WIND_SPEED, 0f);
+        }
         Process ffmpeg = ffmpeg(dir.resolve("water-lauterbrunnen.mp4"));
         byte[] rgb = new byte[3 * WIDTH * HEIGHT];
         try (TestGpu gpu = TestGpu.open(); OutputStream out = ffmpeg.getOutputStream()) {
@@ -175,6 +178,18 @@ class WaterFilms {
                         p(lip[0], lip[1] - 140, lip[2]), p(lip[0], lip[1] - 150, lip[2]), 50)};
                 long frames = 0;
                 double ev = 12;
+                // TRUESIM_FILM_QUICK=<shot>: a second of that shot's middle only, to look at the water quickly
+                String quick = System.getenv("TRUESIM_FILM_QUICK");
+                if (quick != null) {
+                    Shot q = shots[Integer.parseInt(quick)];
+                    double[] at = new double[3];
+                    double[] toward = new double[3];
+                    for (int k = 0; k < 3; k++) {
+                        at[k] = 0.5 * (q.from()[k] + q.to()[k]);
+                        toward[k] = 0.5 * (q.lookFrom()[k] + q.lookTo()[k]);
+                    }
+                    shots = new Shot[] {new Shot(1, at, at, toward, toward, q.fov())};
+                }
                 for (Shot shot : shots) {
                     rig.fovY = Math.toRadians(shot.fov());
                     place(rig, shot, 0);

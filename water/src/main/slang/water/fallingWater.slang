@@ -27,6 +27,7 @@ public struct FallingWaterParameters
     [Range(0, 1)] public float edge = 0.35;      // how far in from the sides it thins (a share of the half width)
     [Range(0, 4)] public float atomising = 1.2;  // how fast the water's own coverage falls as it atomises
     [Range(0, 1)] public float veil = 0.45;      // the coverage left once atomised: the spray's white veil
+    [Range(0, 1)] public float jetOpacity = 0;   // the jets' coverage over the veil (0: the spray's streaks draw them)
     public int jets = 0;                         // 1: the jets' submesh (thinner, ragged)
 };
 
@@ -54,7 +55,7 @@ public struct FallingWater : IMaterial
         float coverage = p.opacity * sides * lerp(p.veil, 1.0, whole);
         if (p.jets != 0)
         {
-            coverage *= 0.3; // ragged streaks over the veil, not a second sheet
+            coverage *= p.jetOpacity; // their ends cut across the veil as hard steps where they show strongly
         }
         s.alpha = saturate(coverage);
         s.albedo = lerp(p.glassy, p.color, saturate(max(aeration, broken * 0.5)));
@@ -98,9 +99,15 @@ public struct FallingWater : IMaterial
         float phase = 6.2831853 * (time / period - fallen / (9.0 * period));
         float swing = 1 + wind[0].sway * sin(phase) + 0.5 * wind[0].sway * sin(2.3 * phase + 1.7);
         float drift = min(wind[0].drift * speed, 1.0) * fallen * swing;
-        float3 along = in.toMesh(float3(level.x, 0, level.y));
-        float3 across = in.toMesh(float3(-level.y, 0, level.x));
-        d.position = in.position + along * drift + across * (0.15 * drift * sin(phase * 0.7 + 0.4));
+        // out from the face (the sheet's normal) the wind lifts the veil away; across the face it swings, less, so
+        // the veil never drifts into the rock beside it
+        float3 blow = in.toMesh(float3(level.x, 0, level.y));
+        float3 out = in.normal;
+        out.y = 0;
+        out = dot(out, out) > 1e-8 ? normalize(out) : blow;
+        float3 lateral = blow - out * dot(blow, out);
+        float outward = 0.6 + 0.4 * abs(dot(blow, out));
+        d.position = in.position + out * (drift * outward) + lateral * (0.08 * drift * sin(phase * 0.7 + 0.4));
         return d;
     }
 };
