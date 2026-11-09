@@ -130,17 +130,20 @@ class WaterFilms {
                 WaterNetwork rivers = WaterNetwork.build(heights, REGION, WaterParameters.DEFAULTS);
                 System.out.printf(Locale.ROOT, "network: %d channels, %d falls in %.1f s%n", rivers.channels().size(),
                     rivers.falls().size(), (System.nanoTime() - start) / 1e9);
+                rig.flow.wetness(rig.closing(WaterWetness.of(rivers, settings).upload(rig.device)));
                 Terrain terrain = rig.terrain(site, terrainMaterial().ref(),
                     TerrainModifiers.of(WaterTerrain.of(rivers)));
                 PathAssets paths = new PathAssets(rig.assets);
                 ProceduralAssets procedural = new ProceduralAssets(paths, new GenerationCache(
                     Files.createDirectories(Path.of("build", "generated-rocks")))).install();
-                WaterScene water = new WaterScene(rig.scene, new WaterAssets(paths), rivers, WaterScene.Look.of(
+                WaterScene.Look look = WaterScene.Look.of(
                     WaterMaterials.river(FlowingWaterParameters.DEFAULTS).ref(),
                     WaterMaterials.sheet(FallingWaterParameters.DEFAULTS).ref(),
                     WaterMaterials.jets(FallingWaterParameters.DEFAULTS).ref(),
                     MaterialData.builder(MaterialData.METALLIC_ROUGHNESS).set("baseColor", 0.24f, 0.23f, 0.21f, 1f)
-                        .set("roughness", 0.75f).build().ref()))
+                        .set("roughness", 0.75f).build().ref());
+                rig.preload(look.river(), look.sheet(), look.jets());
+                WaterScene water = new WaterScene(rig.scene, new WaterAssets(paths), rivers, look)
                     .stones(procedural).effects(rig.effects).place(settings);
                 Waterfall staubbach = staubbach(rivers);
                 Channel fallChannel = rivers.channels().get(staubbach.channel());
@@ -166,10 +169,10 @@ class WaterFilms {
                     new Shot(9, p(fx + dx * 110 - dz * 50, fy + 5, fz + dz * 110 + dx * 50),
                         p(fx + dx * 85 + dz * 35, fy + 8, fz + dz * 85 - dx * 35),
                         p(fx, fy + 25, fz), p(fx, fy + 170, fz), 70),
-                    // the valley floor at noon: the river before the cliff and the fall
-                    new Shot(11, p(fx + dx * 700 - dz * 200, fy + 12, fz + dz * 700 + dx * 200),
-                        p(fx + dx * 520 - dz * 120, fy + 14, fz + dz * 520 + dx * 120),
-                        p(lip[0], lip[1] - 120, lip[2]), p(lip[0], lip[1] - 140, lip[2]), 55)};
+                    // the valley floor at noon: the fall's veil down the cliff, the stream before it
+                    new Shot(11, p(fx + dx * 520 - dz * 160, fy + 10, fz + dz * 520 + dx * 160),
+                        p(fx + dx * 380 - dz * 90, fy + 12, fz + dz * 380 + dx * 90),
+                        p(lip[0], lip[1] - 140, lip[2]), p(lip[0], lip[1] - 150, lip[2]), 50)};
                 long frames = 0;
                 double ev = 12;
                 for (Shot shot : shots) {

@@ -72,7 +72,8 @@ public final class WaterMaterials {
     private static MaterialData falling(FallingWaterParameters p) {
         MaterialData.Builder builder = MaterialData.builder(FALLING);
         values(builder, p);
-        return builder.alpha(MaterialData.AlphaMode.BLEND, 0.5f).doubleSided(true).build();
+        // the sway's reach: drift times the fall, generous for the tallest falls (the bounds culling grows by)
+        return builder.set("displacement", 160f).alpha(MaterialData.AlphaMode.BLEND, 0.5f).doubleSided(true).build();
     }
 
     /** Every field of record {@code p} as a value of {@code builder}. */

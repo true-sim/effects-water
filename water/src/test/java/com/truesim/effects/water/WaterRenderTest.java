@@ -21,6 +21,9 @@ import org.junit.jupiter.api.Test;
  */
 class WaterRenderTest {
 
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path dir;
+
     private static final int W = 160;
     private static final int H = 96;
 
@@ -29,16 +32,20 @@ class WaterRenderTest {
         WaterNetwork network = WaterNetwork.build(WaterSceneTest.CLIFF, WaterSceneTest.REGION,
             WaterParameters.DEFAULTS);
         EngineSettings settings = new EngineSettings();
-        settings.set(WaterRenderSettings.STONES, false);
+        settings.set(WaterRenderSettings.STONE_LIMIT, 400);
         try (TestGpu gpu = TestGpu.open(); WaterRig rig = new WaterRig(gpu, W, H, settings, 160, 40)) {
             rig.fovY = Math.toRadians(60);
             rig.look(60, 1845, 1160, -60, -10, -150);
             rig.settleScene(5);
             float[] empty = rig.rgb();
-            WaterScene water = new WaterScene(rig.scene, new WaterAssets(new PathAssets(rig.assets)), network,
-                WaterScene.Look.of(WaterMaterials.river(FlowingWaterParameters.DEFAULTS).ref(),
-                    WaterMaterials.sheet(FallingWaterParameters.DEFAULTS).ref(),
-                    WaterMaterials.jets(FallingWaterParameters.DEFAULTS).ref(), null))
+            WaterScene.Look look = WaterScene.Look.of(WaterMaterials.river(FlowingWaterParameters.DEFAULTS).ref(),
+                WaterMaterials.sheet(FallingWaterParameters.DEFAULTS).ref(),
+                WaterMaterials.jets(FallingWaterParameters.DEFAULTS).ref(), null);
+            rig.preload(look.river(), look.sheet(), look.jets());
+            PathAssets paths = new PathAssets(rig.assets);
+            WaterScene water = new WaterScene(rig.scene, new WaterAssets(paths), network, look)
+                .stones(new com.truesim.common.procedural.assets.ProceduralAssets(paths,
+                    new com.truesim.common.procedural.assets.GenerationCache(dir)).install())
                 .effects(rig.effects).place(settings);
             rig.frameSeconds = 0;
             rig.settleScene(10);
@@ -57,6 +64,27 @@ class WaterRenderTest {
             rig.frame();
             float[] d = rig.rgb();
             assertThat(changed(c, d)).as("still without the hook, but for the spray").isLessThan(changed(a, b) + 1);
+            // the wet stones and banks: darker with the wetness map than without, looking down on the stream
+            rig.flow.active(true);
+            var stone = network.stones().stream().filter(com.truesim.common.procedural.water.BedStone::emergent)
+                .max(java.util.Comparator.comparingDouble(com.truesim.common.procedural.water.BedStone::size))
+                .orElseThrow();
+            double away = 3 + 4 * stone.size();
+            rig.look(stone.x() + away, stone.y() + away, stone.z() + away, -away, -away, -away);
+            rig.settleScene(5);
+            rig.frame();
+            float[] dry = rig.rgb();
+            try (var map = WaterWetness.of(network, settings).upload(rig.device)) {
+                rig.flow.wetness(map);
+                rig.frame();
+                rig.frame();
+                float[] wet = rig.rgb();
+                rig.flow.wetness(null);
+                rig.frame();
+                rig.device.waitIdle();
+                assertThat(changed(dry, wet)).as("pixels the wetness darkens").isPositive();
+                assertThat(sum(wet)).isLessThan(sum(dry));
+            }
             water.close();
             // the flow's clock
             WaterFlow flow = rig.flow;
@@ -69,6 +97,14 @@ class WaterRenderTest {
             assertThat(flow.time()).isEqualTo(1);
             assertThatThrownBy(() -> flow.advance(-1)).isInstanceOf(IllegalArgumentException.class);
         }
+    }
+
+    private static double sum(float[] a) {
+        double s = 0;
+        for (float v : a) {
+            s += v;
+        }
+        return s;
     }
 
     /** Pixels differing by more than 1 %. */

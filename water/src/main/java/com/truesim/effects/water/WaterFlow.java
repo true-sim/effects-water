@@ -40,12 +40,16 @@ public final class WaterFlow implements Technique {
     public static final Id<WaterFlow> ID = Id.of("truesim.water.flow", WaterFlow.class);
 
     private static final ValueLayout.OfFloat F32 = ValueLayout.JAVA_FLOAT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+    private static final ValueLayout.OfLong I64 = ValueLayout.JAVA_LONG_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+    /** The record's wetness address (its uint64, aligned after wetFade: the generated record has no field for it). */
+    static final long WETNESS_OFFSET = WaterFlowParameters.WET_FADE.offset() + 8;
     /** A day: the clock wraps so float seconds keep their precision. */
     private static final double WRAP = 86_400;
 
     private final SceneView view;
     private volatile double time;
     private volatile boolean active = true;
+    private volatile long wetness;
 
     /** The flow in {@code view}. */
     public WaterFlow(SceneView view) {
@@ -95,6 +99,16 @@ public final class WaterFlow implements Technique {
         return time;
     }
 
+    /**
+     * The wetness map the hook darkens wet ground by ({@link WaterWetness#upload}: the buffer stays the caller's, alive
+     * while the view draws); null: none.
+     */
+    @AllowImpure("the map's address, written each frame")
+    public WaterFlow wetness(com.truesim.engine.vulkan.GpuBuffer map) {
+        wetness = map == null ? 0 : map.deviceAddress();
+        return this;
+    }
+
     /** Turns the flow on or off from the next frame (its bit of the view's hook block: no rebuild). */
     @AllowImpure("a switch")
     public WaterFlow active(boolean on) {
@@ -120,6 +134,7 @@ public final class WaterFlow implements Technique {
             public void write(PassContext ctx, ShadingHookParameters authored, MemorySegment into, long offset) {
                 authored.write(into, offset);
                 into.set(F32, offset + WaterFlowParameters.TIME.offset(), (float) time);
+                into.set(I64, offset + WETNESS_OFFSET, wetness);
             }
         });
     }
