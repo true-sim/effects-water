@@ -18,13 +18,13 @@ import water.waterMark;
 [MaterialParameters(FEATURE_TRANSMISSION | FEATURE_VOLUME | FEATURE_IOR)]
 public struct FlowingWaterParameters
 {
-    [Color] public float3 attenuationColor = float3(0.52, 0.66, 0.63); // white light after attenuationDistance
+    [Color] public float3 attenuationColor = float3(0.64, 0.70, 0.68); // white light after attenuationDistance
     public float attenuationDistance = 0.7;     // metres: glacial water is clouded by its silt
-    [Color] public float3 silt = float3(0.46, 0.58, 0.55); // the light the silt scatters back: milky turquoise-grey
-    [Range(0, 1)] public float turbidity = 0.7; // how much the silt scatters back in shallow water
-    public float clarity = 0.45;                 // metres of water the bed shows through before the silt hides it
+    [Color] public float3 silt = float3(0.52, 0.58, 0.56); // the light the silt scatters back: milky turquoise-grey
+    [Range(0, 1)] public float turbidity = 0.82; // how much the silt scatters back in shallow water
+    public float clarity = 0.35;                 // metres of water the bed shows through before the silt hides it
     public float poolDepth = 1.5;                // metres: deeper water darkens toward the pools' colour
-    [Color] public float3 pool = float3(0.20, 0.31, 0.31); // the scattered light's colour in deep pools
+    [Color] public float3 pool = float3(0.30, 0.36, 0.35); // the scattered light's colour in deep pools
     [Range(0, 1)] public float roughness = 0.12;
     public float ior = 1.33;
     [Color] public float3 foamColor = float3(0.88, 0.91, 0.93);

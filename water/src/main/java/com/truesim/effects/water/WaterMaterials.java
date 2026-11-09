@@ -38,6 +38,9 @@ public final class WaterMaterials {
     public static void register(Materials materials) {
         materials.register(FlowingWater.TYPE);
         materials.register(FallingWater.TYPE);
+        // the veils' sway in the vertex stages of every pass: displaced once a frame into the instance's copy
+        // (COMPUTE), a swaying veil showed horizontal steps (docs/pitfalls.md)
+        materials.displacementMode(FallingWater.TYPE, com.truesim.engine.render.Displacement.RASTER);
     }
 
     /**

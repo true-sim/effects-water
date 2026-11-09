@@ -149,7 +149,10 @@ final class WaterRig implements AutoCloseable {
         port = graph.addView("main").size(width, height);
         view = geometry.createView(port, camera, ViewOptions.of(1 << 17, 1 << 23)).set(1, MeshletRenderer.MODE_LIT);
         port.add(new VisibilityBufferShading(geometry, view, color, VK_FORMAT_D32_SFLOAT))
-            .add(new ClusteredLights(lights, view)).add(new ChosenTransparency(geometry, view));
+            .add(new ClusteredLights(lights, view)).add(new ChosenTransparency(geometry, view))
+            .add(new com.truesim.engine.render.ScreenSpaceReflections(view));
+        // the water reflects the cliffs, stones and banks, not only the sky (engine-render's render.ssr.transparent)
+        settings.set(com.truesim.engine.render.ScreenSpaceReflections.TRANSPARENT, true);
         atmosphere = closing(new Atmosphere(device, slots, graph.settings()));
         Environment environment = Environment.uniform("atmosphere", 0, 0, 0);
         SkyCapture capture = closing(new SkyCapture(atmosphere, environment, textures));

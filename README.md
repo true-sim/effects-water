@@ -20,7 +20,7 @@ beds' field. It is an optional library over the engine's core and uses only the 
 
 ```kotlin
 dependencies {
-    implementation("com.truesim.effects:effects-water:0.1.0")   // engine-scene 0.198, common-procedural 0.5, effects-terrain 0.5
+    implementation("com.truesim.effects:effects-water:0.3.0")   // engine-scene 0.201, common-procedural 0.11, effects-terrain 0.5
 }
 ```
 
@@ -52,9 +52,10 @@ flow.advance(frame.delta());
 sway.update(frame.delta(), settings);
 ```
 
-With engine-render's `render.ssr.transparent` on (true-sim/engine#472, once released:
-`graph.settings().set(ScreenSpaceReflections.TRANSPARENT, true)`), the water reflects the opaque scene (cliffs, trees,
-houses) in screen space, as opaque surfaces do.
+With engine-render's `render.ssr.transparent` on (engine 0.201:
+`graph.settings().set(ScreenSpaceReflections.TRANSPARENT, true)`, while `render.ssr` is on), the water reflects the
+opaque scene (cliffs, trees, houses, its stones and banks) in screen space, as opaque surfaces do. The films run with
+it on.
 
 The view also needs what draws the rest: the view's transparency (`ChosenTransparency`: the water draws with the
 blended surfaces), effects-particles' `ParticleDraw` and simulation for the spray, effects-atmosphere's `AtmosphereFog`
@@ -68,7 +69,9 @@ blended surfaces), effects-particles' `ParticleDraw` and simulation for the spra
   pools' colour in deep water (`pool`, `poolDepth`), clearer at the shore; what passes refracted (`ior` 1.33) and
   absorbed over the depth (`attenuationColor` after `attenuationDistance`); Fresnel reflections; foam where the vertices
   carry it (the Froude number, emergent stones, plunge pools). The flow hook moves it: two phases of ripples advected
-  along the flow and cross-faded (Vlachos 2010), stronger in fast water; standing waves where the water runs fast and
+  along the flow and cross-faded (Vlachos 2010), each place's phase offset by slow noise so no pulse sweeps the river,
+stronger in fast water; the detail is gradient noise in octaves each turned by an irrational angle and scaled by an
+irrational ratio (no lattice or tile shows), its finer octaves and slope fading with distance into roughness; standing waves where the water runs fast and
   white, over stones and steps: crests across the flow at the wavelength a gravity wave needs to stand in the current
   (2 pi v^2 / g), white at their crests (`waves`); foam in streaks along the flow drifting with it (`streakLength`); a
   foam line lapping at the shore.
@@ -76,7 +79,7 @@ blended surfaces), effects-particles' `ParticleDraw` and simulation for the spra
   water atomises (`veil`); the jets thinner and ragged; streaks running down at the water's speed (the hook). The veil
   sways in the wind: the type displaces its vertices by the `water.sway` geometry hook (`WaterSway` writes it each frame
   from `water.render.windSpeed` and `windDirection`), drifting downwind by how far the water has fallen
-  (`swayDrift`), the swing travelling down the fall.
+  (`swayDrift`, 0.03; out from the face, little across it), the swing travelling down the fall.
 - **Wet ground** (`WaterWetness`): every other surface the water wets is darkened and glossed by the flow hook
   (`wetDarkening`, `wetGloss`, `wetFade`): the banks and stones in a band above the water's edge
   (`water.render.wetHeight`), and the rock a fall runs down, a dark wet streak from its lip to its foot. A sparse map
@@ -97,7 +100,7 @@ where their strength is set (`anisotropyDirection`, `iridescenceFresnel`, `iride
 `iridescenceThickness`; `anisotropy` and `iridescence` stay 0), and the hook takes it back and puts the defaults back
 (`waterMark.slang`). Without the hook in a view the water lights as the types leave it, still.
 
-Reflections: until engine-render ships `render.ssr.transparent` (#472), transmissive and blended surfaces get no
+Reflections: with `render.ssr.transparent` off (the engine's default), transmissive and blended surfaces get no
 screen-space reflections and the water reflects the environment (the sky capture) only.
 
 ## Settings

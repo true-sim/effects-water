@@ -9,13 +9,13 @@ description = "Water for true-sim: rivers and streams as a flowing-water materia
     "volumes, placed from common-procedural-water's networks through the scene."
 
 dependencies {
-    api("com.truesim.engine:engine-scene:0.198.0") // material types, shading hooks, the scene bridge
-    api("com.truesim.common:common-procedural-water:0.5.0") // the networks: channels, falls, stones, the field
-    api("com.truesim.common:common-procedural-assets:0.5.0") // their meshes as generated assets, rocks
+    api("com.truesim.engine:engine-scene:0.201.0") // material types, shading hooks, the scene bridge
+    api("com.truesim.common:common-procedural-water:0.11.2") // the networks: channels, falls, stones, the field
+    api("com.truesim.common:common-procedural-assets:0.11.2") // their meshes as generated assets, rocks
     api("com.truesim.scene:scene-effects:0.70.0") // spray as effect data
     api("com.truesim.effects:atmosphere-fog:0.4.0") // mist as fog volumes
     api("com.truesim.effects:effects-terrain-data:0.5.0") // beds and banks as a terrain modifier
-    testImplementation(testFixtures("com.truesim.engine:engine-render:0.198.0")) // the headless renderer
+    testImplementation(testFixtures("com.truesim.engine:engine-render:0.201.0")) // the headless renderer
     testImplementation("com.truesim.effects:effects-terrain:0.5.0") // the terrain the films are over
     testImplementation("com.truesim.effects:atmosphere-render:0.4.0") // the sky and its light
     testImplementation("com.truesim.effects:effects-particles:0.4.0") // spray drawn
