@@ -1,0 +1,47 @@
+pluginManagement {
+    // Use ../build-logic when present; override with -Ptruesim.build-logic=<path> (or false).
+    providers.gradleProperty("truesim.build-logic").orElse("../build-logic").get()
+        .takeIf { file(it).isDirectory }?.let { includeBuild(it) }
+    repositories {
+        gradlePluginPortal()
+        maven("https://maven.pkg.github.com/true-sim/build-logic") {
+            credentials {
+                username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
+                password = providers.gradleProperty("gpr.key").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
+            }
+        }
+    }
+}
+
+plugins {
+    id("truesim.settings") version "0.19.1"
+}
+
+rootProject.name = "effects-water"
+
+// Rivers, streams and waterfalls drawn: the flowing-water and waterfall material types, the flow shading hook, spray
+// and mist, and a scene plugin placing common-procedural-water's networks, over the engine's generic hooks.
+include("effects-water")
+project(":effects-water").projectDir = file("water")
+
+// Sibling checkouts are used as included builds when present (override with -Ptruesim.<repo>=<path>, or false).
+val truesimRepos = listOf("build-logic", "common-math", "common-state", "common-jobs", "common-graph", "scene", "engine")
+// Libraries only fetched, never included from a sibling (their own builds include the engine's)
+val fetchedRepos = listOf("common-procedural", "effects-terrain", "effects-atmosphere", "effects-particles")
+for (repo in truesimRepos) {
+    providers.gradleProperty("truesim.$repo").orElse("../$repo").get()
+        .takeIf { file(it).isDirectory }?.let { includeBuild(it) }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        for (repo in truesimRepos + fetchedRepos) {
+            maven("https://maven.pkg.github.com/true-sim/$repo") {
+                credentials {
+                    username = providers.gradleProperty("gpr.user").orElse(providers.environmentVariable("GITHUB_ACTOR")).orNull
+                    password = providers.gradleProperty("gpr.key").orElse(providers.environmentVariable("GITHUB_TOKEN")).orNull
+                }
+            }
+        }
+    }
+}
