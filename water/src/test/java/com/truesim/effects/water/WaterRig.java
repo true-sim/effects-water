@@ -113,6 +113,7 @@ final class WaterRig implements AutoCloseable {
     final EffectSync effectSync;
     final FogRegions fog;
     final WaterFlow flow;
+    final WaterSway sway;
     private final GpuBuffer[] readbacks;
     private final TestTarget target;
     private final List<AutoCloseable> closing = new ArrayList<>();
@@ -166,6 +167,7 @@ final class WaterRig implements AutoCloseable {
         scene.components().set(air, ShadingHookComponent.TYPE, new ShadingHookComponent(AtmosphereFog.HOOK,
             MaterialData.builder(AtmosphereFog.HOOK).set("density", 0f).build().values(), true));
         flow = new WaterFlow(view);
+        sway = new WaterSway(gpuScene);
         particles = closing(new Particles(device, slots, 96L << 20, 4096));
         particles.assets(resources);
         effects = new Effects(scene);
@@ -224,6 +226,7 @@ final class WaterRig implements AutoCloseable {
         atmosphere.light(lights, 0, 1);
         effects.advance(frameSeconds);
         flow.advance(frameSeconds);
+        sway.update(frameSeconds, settings);
         scene.update();
         sync.update();
         hooks.update();
@@ -254,6 +257,25 @@ final class WaterRig implements AutoCloseable {
             Thread.sleep(1);
         }
         device.waitIdle();
+    }
+
+    /**
+     * Loads {@code materials} before anything draws with them: a material instances took keeps displacing or not
+     * (engine-render's Materials.set), so the falls' displacing materials must arrive before their nodes do.
+     */
+    @SafeVarargs
+    final void preload(AssetRef<MaterialData>... materials) throws InterruptedException {
+        for (AssetRef<MaterialData> m : materials) {
+            assets.acquire(m);
+        }
+        long deadline = System.nanoTime() + 60_000_000_000L;
+        for (AssetRef<MaterialData> m : materials) {
+            while (assets.get(m) == null) {
+                assertThat(System.nanoTime()).as("the materials loading").isLessThan(deadline);
+                tasks.drainCompleted();
+                Thread.sleep(1);
+            }
+        }
     }
 
     /** Frames until nothing loads (without a terrain), at least {@code minFrames}. */

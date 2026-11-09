@@ -21,3 +21,17 @@ and at least one particle module in the sources that compile it (here the tests'
 
 `[Color]` belongs to material parameters (the materials module); in a `[ShadingHookParameters]` struct slangc stops
 with `unknown attribute 'Color'` (flow.slang's `foamColor`, the first build).
+
+## `f16tof32` needs the Float16 capability
+
+flow.slang first decoded the wetness map's halves with `f16tof32`; slangc declared SPIR-V's `Float16` capability and
+the validation layer refused every shader module with the hook (`VUID-VkShaderModuleCreateInfo-pCode-08740`:
+`shaderFloat16` not enabled; WaterRenderTest, 10 errors). The halves are decoded by hand (`halfBits`). Rule: no
+16-bit float types or intrinsics in shaders the engine's device may run without `shaderFloat16`.
+
+## A displacing material must arrive before the instances that take it
+
+The falls' material (`waterfall`, GEOMETRY_DISPLACE) placed while still loading: the scene's material set took the
+placeholder (metallic-roughness, not displacing), and when the data arrived `Materials.set` threw "Material 2 is drawn
+by instances and did not displace" (WaterRenderTest). Rule: load the water's materials (`assets.acquire` until
+loaded) before `WaterScene.place` (the tests' `WaterRig.preload`).

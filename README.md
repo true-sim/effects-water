@@ -16,7 +16,7 @@ beds' field. It is an optional library over the engine's core and uses only the 
 
 | Module | Contents |
 |---|---|
-| `effects-water` | `WaterMaterials`, `WaterFlow`, `WaterScene`, `WaterSpray`, `WaterTerrain`, `WaterRenderSettings`; the Slang of `src/main/slang/water/` |
+| `effects-water` | `WaterMaterials`, `WaterFlow`, `WaterSway`, `WaterWetness`, `WaterScene`, `WaterSpray`, `WaterTerrain`, `WaterRenderSettings`; the Slang of `src/main/slang/water/` |
 
 ```kotlin
 dependencies {
@@ -33,20 +33,28 @@ WaterNetwork rivers = WaterNetwork.build((x, z) -> ground.heightAt(x, z, 2), reg
 // the terrain with the beds and banks carved in (other modifiers, a settlement's roads, after it)
 Terrain terrain = new Terrain(world, resources, site, terrainMaterial, settings,
     TerrainModifiers.of(WaterTerrain.of(rivers)));
-// the materials' types, once; the water placed in the scene
+// the materials' types, once; the materials loaded (the falls' displace: they must arrive before their nodes)
 WaterMaterials.register(resources.materials());
-WaterScene water = new WaterScene(scene, new WaterAssets(paths), rivers, WaterScene.Look.of(
-        WaterMaterials.river(FlowingWaterParameters.DEFAULTS).ref(),
-        WaterMaterials.sheet(FallingWaterParameters.DEFAULTS).ref(),
-        WaterMaterials.jets(FallingWaterParameters.DEFAULTS).ref(), stoneMaterial))
+WaterScene.Look look = WaterScene.Look.of(WaterMaterials.river(FlowingWaterParameters.DEFAULTS).ref(),
+    WaterMaterials.sheet(FallingWaterParameters.DEFAULTS).ref(),
+    WaterMaterials.jets(FallingWaterParameters.DEFAULTS).ref(), stoneMaterial);
+// ... cache.acquire(look.river(), look.sheet(), look.jets()) and wait until they are loaded, then:
+WaterScene water = new WaterScene(scene, new WaterAssets(paths), rivers, look)
     .stones(proceduralAssets)                    // rocks of common-procedural-assets, or none
     .effects(effects)                            // scene-effects' Effects: spray, or none
     .place(settings);
-// in each view: the flow's hook; each frame, its clock
-WaterFlow flow = new WaterFlow(view);
+// in each view: the flow's hook, with the wet ground's map; each frame, its clock and the falls' sway
+GpuBuffer wet = WaterWetness.of(rivers, settings).upload(device);  // close it with the view
+WaterFlow flow = new WaterFlow(view).wetness(wet);
 port.add(flow);
+WaterSway sway = new WaterSway(gpuScene);
 flow.advance(frame.delta());
+sway.update(frame.delta(), settings);
 ```
+
+With engine-render's `render.ssr.transparent` on (true-sim/engine#472, once released:
+`graph.settings().set(ScreenSpaceReflections.TRANSPARENT, true)`), the water reflects the opaque scene (cliffs, trees,
+houses) in screen space, as opaque surfaces do.
 
 The view also needs what draws the rest: the view's transparency (`ChosenTransparency`: the water draws with the
 blended surfaces), effects-particles' `ParticleDraw` and simulation for the spray, effects-atmosphere's `AtmosphereFog`
@@ -55,18 +63,30 @@ blended surfaces), effects-particles' `ParticleDraw` and simulation for the spra
 
 ## What it draws
 
-- **Channels** (`flowingWater`): glacial water, a little milky with silt (`turbidity`, `silt`), clearer at the shore;
-  the bed seen through it refracted (`ior` 1.33) and absorbed over the depth the vertices carry (`attenuationColor`
-  after `attenuationDistance`); Fresnel reflections of the environment; foam where the vertices carry it (the Froude
-  number, emergent stones, plunge pools). The flow hook moves it: two phases of ripples advected along the flow and
-  cross-faded (Vlachos 2010), stretched along the current and stronger in fast water; foam broken into patches drifting
-  with the current; a foam line lapping at the shore.
-- **Falls** (`waterfall`): the sheet glassy at the lip and aerated below, its sides thinning, its coverage falling as
-  the water atomises; the jets thinner and ragged; streaks running down at the water's speed (the hook).
+- **Channels** (`flowingWater`): glacial water, milky turquoise-grey: the silt scatters light back within the water
+  (`silt`, `turbidity`), more the deeper it is (`clarity`: the bed shows through shallow water), darkening toward the
+  pools' colour in deep water (`pool`, `poolDepth`), clearer at the shore; what passes refracted (`ior` 1.33) and
+  absorbed over the depth (`attenuationColor` after `attenuationDistance`); Fresnel reflections; foam where the vertices
+  carry it (the Froude number, emergent stones, plunge pools). The flow hook moves it: two phases of ripples advected
+  along the flow and cross-faded (Vlachos 2010), stronger in fast water; standing waves where the water runs fast and
+  white, over stones and steps: crests across the flow at the wavelength a gravity wave needs to stand in the current
+  (2 pi v^2 / g), white at their crests (`waves`); foam in streaks along the flow drifting with it (`streakLength`); a
+  foam line lapping at the shore.
+- **Falls** (`waterfall`): the sheet glassy at the lip and aerated below, its sides thinning, a white veil left as the
+  water atomises (`veil`); the jets thinner and ragged; streaks running down at the water's speed (the hook). The veil
+  sways in the wind: the type displaces its vertices by the `water.sway` geometry hook (`WaterSway` writes it each frame
+  from `water.render.windSpeed` and `windDirection`), drifting downwind by how far the water has fallen
+  (`swayDrift`), the swing travelling down the fall.
+- **Wet ground** (`WaterWetness`): every other surface the water wets is darkened and glossed by the flow hook
+  (`wetDarkening`, `wetGloss`, `wetFade`): the banks and stones in a band above the water's edge
+  (`water.render.wetHeight`), and the rock a fall runs down, a dark wet streak from its lip to its foot. A sparse map
+  of tiles over the region, uploaded once, read by its address.
 - **Spray** (`WaterSpray`): from each spray source of a fall (common-procedural-water's `Waterfall.spray()`), streaks
-  breaking into drifting drops, and soft puffs thrown up and spreading at the foot, carried by the wind; rates from the
-  water each source turns to spray (`water.render.sprayRate`, capped).
-- **Mist**: an ellipsoid fog volume at each fall's foot, as dense as the spray rate makes it, thinning upward.
+  breaking into drifting drops, and a broad halo of soft puffs thrown up and spreading at the foot
+  (`water.render.plungeReach` of the fall's height), drifting with the wind; rates from the water each source turns to
+  spray (`water.render.sprayRate`, capped).
+- **Mist**: an ellipsoid fog volume at each fall's foot, centred on it, as dense as the spray rate makes it
+  (`water.render.mistDensity`), thinning upward and faded all the way in from its edge, so no shell shows close by.
 - **Beds and banks** (`WaterTerrain`): the terrain cut to the bed's parabola and the banks' slope (never raised), gravel
   in the bed and on the bars, sand across the bank's outer part where grass grows back.
 - **Stones**: the beds' stones as rocks scaled and turned, the largest first up to `water.render.stoneLimit`.
@@ -77,16 +97,17 @@ where their strength is set (`anisotropyDirection`, `iridescenceFresnel`, `iride
 `iridescenceThickness`; `anisotropy` and `iridescence` stay 0), and the hook takes it back and puts the defaults back
 (`waterMark.slang`). Without the hook in a view the water lights as the types leave it, still.
 
-Limits: transmissive and blended surfaces get no screen-space reflections from the engine (README "Surface outputs and
-screen-space reflections"): the water reflects the environment (the sky capture), not the cliffs beside it. Traced
-reflections are the engine's #379.
+Reflections: until engine-render ships `render.ssr.transparent` (#472), transmissive and blended surfaces get no
+screen-space reflections and the water reflects the environment (the sky capture) only.
 
 ## Settings
 
 `WaterRenderSettings.ALL` (`water.render.*`): `stones`, `stoneLimit`, `stoneLevel`, `minFall` (the lowest fall dressed
-with spray and mist), `sprayRate`, `maxSpray`, `minSpray`, `mist`, `mistDensity`. The network's own tunables are
+with spray and mist), `sprayRate`, `maxSpray`, `minSpray`, `mist`, `mistDensity`, `windSpeed`, `windDirection`,
+`swayDrift`, `wetHeight`, `wetCell`, `plungeReach`. The network's own tunables are
 common-procedural-water's `WaterSettings` (`water.*`); the hook's (`rippleScale`, `rippleSlope`, `cycle`, `foamScale`,
-`foamCover`, `foamColor`, `lapping`, `streakScale`, `streakContrast`) are its record's, set as the scene's values
+`foamCover`, `foamColor`, `lapping`, `streakScale`, `streakContrast`, `waves`, `streakLength`, `wetDarkening`, `wetGloss`,
+`wetFade`) are its record's, set as the scene's values
 (engine-scene's `ShadingHookComponent` for `water.flow`).
 
 ## Tests and films

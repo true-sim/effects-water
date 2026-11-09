@@ -2,11 +2,15 @@
 // it animates the surface in world space with the frame's time, the same in every way of shading:
 //
 //   channels  flow-mapped ripples (two phases of noise advected along the flow and cross-faded, so the pattern moves
-//             with the current without stretching; Vlachos 2010), stronger in fast water; foam broken into patches
-//             drifting with the current where the vertices carry it, and lapping at the shore
+//             with the current without stretching; Vlachos 2010), stronger in fast water; standing waves where the
+//             flow is fast and broken (over stones and steps: crests across the flow, their wavelength the one a
+//             gravity wave needs to stand in the current, 2 pi v^2 / g), white at their crests; foam in streaks along
+//             the flow, drifting with it, where the vertices carry foam; a line lapping at the shore
 //   falls     streaks running down the sheet at the water's speed, brighter and rougher as it aerates
 //
-// Other surfaces pass untouched. The technique (WaterFlow.java) adds the hook to a view and writes its time.
+// Every other surface (the banks, stones, the rock behind a fall) is darkened and glossed where the water wets it: a
+// band above the water's edge, and the rock a fall runs down (WaterWetness.java's map, at the record's address).
+// The technique (WaterFlow.java) adds the hook to a view and writes its time and the map's address.
 module flow;
 
 import hooks;
@@ -26,7 +30,88 @@ public struct WaterFlowParameters
     public float lapping = 0.6;           // the shore's foam line
     public float streakScale = 0.35;      // falls: metres across a streak
     public float streakContrast = 0.45;   // falls: how much the streaks brighten and darken
+    public float waves = 0.35;            // the standing waves' slope where the water is white
+    public float streakLength = 6;        // channels: foam streaks' length along the flow over their width
+    public float wetDarkening = 0.35;     // what wet ground's colour is multiplied by
+    public float wetGloss = 0.45;         // how much smoother wet ground turns (a share of its roughness)
+    public float wetFade = 0.35;          // metres over which the wet band fades out at its top
+    public uint64_t wetness = 0;          // the wetness map (WaterWetness), or 0: none
 };
+
+/** The wetness map's header (WaterWetness.java writes it). */
+struct WetHeader
+{
+    float x0;          // the region's west edge
+    float z0;          // north edge
+    float cell;        // metres a cell
+    float tile;        // metres a tile
+    uint tilesX;
+    uint tilesZ;
+    uint cells;        // cells a tile side
+    uint index;        // byte offset of the tile index: a uint per tile, 0 for none, else its number plus 1
+    uint bases;        // byte offset of the tiles' base heights, a float each
+    uint data;         // byte offset of the cells: per cell two float16 above the base, top low, bottom high
+};
+
+/** A float16's bits as a float, by hand: f16tof32 would need the Float16 capability, which devices may lack. */
+float halfBits(uint h)
+{
+    uint e = (h >> 10) & 31u;
+    uint m = h & 1023u;
+    float sign = (h & 0x8000u) != 0 ? -1.0 : 1.0;
+    if (e == 0)
+    {
+        return sign * float(m) * 5.9604645e-8; // subnormal: m x 2^-24
+    }
+    if (e == 31)
+    {
+        return sign * 65504.0;
+    }
+    return asfloat(((h & 0x8000u) << 16) | ((e + 112u) << 23) | (m << 13));
+}
+
+/** How wet the point `w` is (0 to 1) by the map at `address`. */
+float wetness(uint64_t address, float3 w, float fade)
+{
+    WetHeader* h = (WetHeader*) address;
+    float x0 = h[0].x0;
+    float z0 = h[0].z0;
+    float tile = h[0].tile;
+    uint tilesX = h[0].tilesX;
+    uint tilesZ = h[0].tilesZ;
+    float tx = (w.x - x0) / tile;
+    float tz = (w.z - z0) / tile;
+    if (tx < 0 || tz < 0 || tx >= float(tilesX) || tz >= float(tilesZ))
+    {
+        return 0;
+    }
+    uint ti = min(uint(tx), tilesX - 1);
+    uint tj = min(uint(tz), tilesZ - 1);
+    uint* index = (uint*) (address + h[0].index);
+    uint number = index[tj * tilesX + ti];
+    if (number == 0)
+    {
+        return 0;
+    }
+    uint cells = h[0].cells;
+    uint ci = min(uint((tx - float(ti)) * float(cells)), cells - 1);
+    uint cj = min(uint((tz - float(tj)) * float(cells)), cells - 1);
+    float* bases = (float*) (address + h[0].bases);
+    uint* data = (uint*) (address + h[0].data);
+    uint word = data[(number - 1) * cells * cells + cj * cells + ci];
+    if (word == 0)
+    {
+        return 0;
+    }
+    float base = bases[number - 1];
+    float top = base + halfBits(word & 0xffffu);
+    float bottom = base + halfBits(word >> 16);
+    if (w.y < bottom)
+    {
+        return 0;
+    }
+    return 1 - smoothstep(top - max(fade, 0.01), top, w.y);
+}
 
 /** A hash of a lattice point, 0 to 1. */
 float hash2(int2 c)
@@ -84,6 +169,16 @@ public struct WaterFlowHook : ISurfaceHook
     {
         if (!isWater(s))
         {
+            uint64_t map = params[0].wetness;
+            if (map != 0)
+            {
+                float wet = wetness(map, p.world(), params[0].wetFade);
+                if (wet > 0)
+                {
+                    s.albedo *= lerp(1.0, params[0].wetDarkening, wet);
+                    s.roughness *= lerp(1.0, 1 - params[0].wetGloss, wet);
+                }
+            }
             return;
         }
         WaterFlow f = takeFlow(s);
@@ -122,16 +217,34 @@ public struct WaterFlowHook : ISurfaceHook
         float3 n = s.normal;
         float3 tilted = normalize(n - float3(gradient.x, 0, gradient.y) * slope);
         s.normal = dot(tilted, n) > 0.2 ? tilted : n;
-        // foam: patches drifting with the current where the vertices carry foam, and a line lapping at the shore
+        // standing waves where the water runs fast and white: crests across the flow, standing still, their
+        // wavelength 2 pi v^2 / g (a gravity wave's that stands in the current), broken up by noise across
+        float white = smoothstep(0.25, 0.9, max(f.foam, f.speed / 4.5));
+        float2 side = float2(-level.y, level.x);
+        float along = dot(at, level);
+        float acrossAt = dot(at, side);
+        float wavelength = clamp(6.2831853 * f.speed * f.speed / 9.81, 0.4, 8.0);
+        float3 breakup = fbm(float2(along / (wavelength * 2), acrossAt / (wavelength * 1.2)) + float2(3.3, 1.9));
+        float crestPhase = 6.2831853 * along / wavelength + breakup.x * 4 + 0.6 * sin(time * 2.1 + acrossAt * 0.7);
+        float crest = 0.5 + 0.5 * sin(crestPhase);
+        float waveSlope = params[0].waves * white * (0.6 + breakup.x);
+        float3 waved = normalize(s.normal - float3(level.x, 0, level.y) * (cos(crestPhase) * waveSlope));
+        s.normal = dot(waved, n) > 0.2 ? waved : s.normal;
+        // foam: streaks along the flow drifting with it where the vertices carry foam, white water at the waves'
+        // crests, and a line lapping at the shore
         float fs = max(params[0].foamScale, 0.05);
-        float3 c0 = fbm((at - velocity * (phase0 * cycle)) / fs + float2(5.1, 2.3));
-        float3 c1 = fbm((at - velocity * (phase1 * cycle)) / fs + float2(8.7, 4.4));
+        float stretch = max(params[0].streakLength, 1.0);
+        float2 m0 = at - velocity * (phase0 * cycle);
+        float2 m1 = at - velocity * (phase1 * cycle);
+        float3 c0 = fbm(float2(dot(m0, level) / (fs * stretch), dot(m0, side) / fs) + float2(5.1, 2.3));
+        float3 c1 = fbm(float2(dot(m1, level) / (fs * stretch), dot(m1, side) / fs) + float2(8.7, 4.4));
         float cells = 0.5 + c0.x * w0 + c1.x * w1;
         float carried = saturate(f.foam * params[0].foamCover);
         float patches = smoothstep(1 - carried, 1 - carried + 0.18, cells) * step(0.02, carried);
+        float crests = white * smoothstep(0.55, 0.9, crest) * smoothstep(0.35, 0.6, cells);
         float lap = params[0].lapping * smoothstep(0.75, 0.98, f.side)
             * (0.5 + 0.5 * sin(time * 1.7 + (at.x + at.y) * 0.9 + c0.x * 6));
-        float mask = saturate(max(patches, lap * smoothstep(0.4, 0.7, cells)));
+        float mask = saturate(max(max(patches, crests), lap * smoothstep(0.4, 0.7, cells)));
         s.albedo = lerp(s.albedo, params[0].foamColor, mask);
         s.transmission *= 1 - mask;
         s.roughness = lerp(s.roughness, 0.6, mask);

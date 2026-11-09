@@ -83,4 +83,79 @@ class WaterPartsTest {
             stony.close();
         }
     }
+
+    @Test
+    void theWetnessMapCoversBanksAndFalls() {
+        WaterNetwork network = WaterNetwork.build(WaterSceneTest.CLIFF, WaterSceneTest.REGION,
+            WaterParameters.DEFAULTS);
+        WaterWetness wet = WaterWetness.of(network, new EngineSettings());
+        assertThat(wet.tiles()).isPositive();
+        var c = network.channels().getLast();
+        int i = c.count() / 2;
+        double rx = -c.directionZ(i);
+        double rz = c.directionX(i);
+        double edge = c.width(i) / 2 + 0.5;
+        double surface = c.surface(i);
+        // the bank just above the waterline is wet, a metre higher dry, far off dry
+        assertThat(wet.wet(c.x(i) + rx * edge, surface + 0.2, c.z(i) + rz * edge)).isTrue();
+        assertThat(wet.wet(c.x(i) + rx * edge, surface + 1.5, c.z(i) + rz * edge)).isFalse();
+        assertThat(wet.wet(c.x(i) + 300, surface, c.z(i))).isFalse();
+        assertThat(wet.wet(-5000, 0, -5000)).isFalse();
+        // the rock behind the free fall, half way down
+        var fall = network.tallest();
+        var path = fall.path();
+        int k = path.count() / 2;
+        assertThat(wet.wet(path.x()[k], path.y()[k], path.z()[k])).isTrue();
+        // laid out as flow.slang reads it
+        var bytes = wet.bytes();
+        var f32 = java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        var u32 = java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        assertThat(bytes.get(f32, 0)).isEqualTo((float) WaterSceneTest.REGION.x0());
+        assertThat(bytes.get(u32, 24)).isEqualTo(16);
+        assertThat(bytes.get(u32, 28)).isEqualTo(WaterWetness.HEADER);
+        assertThatThrownBy(() -> WaterWetness.of(network, -1, 1, 16)).isInstanceOf(IllegalArgumentException.class);
+        // the GPU's lookup (flow.slang's wetness) over the bytes agrees with the map
+        double bx = c.x(i) + rx * edge;
+        double bz = c.z(i) + rz * edge;
+        assertThat(shaderWet(bytes, bx, surface + 0.2, bz)).isPositive();
+        assertThat(shaderWet(bytes, bx, surface + 1.5, bz)).isZero();
+        assertThat(shaderWet(bytes, path.x()[k], path.y()[k], path.z()[k])).isPositive();
+    }
+
+    /** flow.slang's wetness(), in Java over the map's bytes (fade 0.35). */
+    static double shaderWet(java.lang.foreign.MemorySegment m, double x, double y, double z) {
+        var f32 = java.lang.foreign.ValueLayout.JAVA_FLOAT_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        var u32 = java.lang.foreign.ValueLayout.JAVA_INT_UNALIGNED.withOrder(java.nio.ByteOrder.LITTLE_ENDIAN);
+        float x0 = m.get(f32, 0);
+        float z0 = m.get(f32, 4);
+        float tile = m.get(f32, 12);
+        int tilesX = m.get(u32, 16);
+        int tilesZ = m.get(u32, 20);
+        int cells = m.get(u32, 24);
+        float tx = (float) ((x - x0) / tile);
+        float tz = (float) ((z - z0) / tile);
+        if (tx < 0 || tz < 0 || tx >= tilesX || tz >= tilesZ) {
+            return 0;
+        }
+        int ti = Math.min((int) tx, tilesX - 1);
+        int tj = Math.min((int) tz, tilesZ - 1);
+        int number = m.get(u32, m.get(u32, 28) + 4L * (tj * tilesX + ti));
+        if (number == 0) {
+            return 0;
+        }
+        int ci = Math.min((int) ((tx - ti) * cells), cells - 1);
+        int cj = Math.min((int) ((tz - tj) * cells), cells - 1);
+        int word = m.get(u32, m.get(u32, 36) + 4L * ((long) (number - 1) * cells * cells + cj * cells + ci));
+        if (word == 0) {
+            return 0;
+        }
+        float base = m.get(f32, m.get(u32, 32) + 4L * (number - 1));
+        float top = base + Float.float16ToFloat((short) (word & 0xffff));
+        float bottom = base + Float.float16ToFloat((short) (word >>> 16));
+        if (y < bottom) {
+            return 0;
+        }
+        double t = Math.clamp((y - (top - 0.35)) / 0.35, 0, 1);
+        return 1 - t * t * (3 - 2 * t);
+    }
 }

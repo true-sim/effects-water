@@ -32,6 +32,10 @@ public final class WaterSpray {
     public static final EffectParameter.Float RATE = new EffectParameter.Float("rate");
     /** The falling water's speed there, metres a second (falling streaks). */
     public static final EffectParameter.Float SPEED = new EffectParameter.Float("speed");
+    /** The wind's east part, metres a second: the spray drifts with it. */
+    public static final EffectParameter.Float WIND_X = new EffectParameter.Float("windX");
+    /** The wind's south part. */
+    public static final EffectParameter.Float WIND_Z = new EffectParameter.Float("windZ");
 
     /** The kind of effect: spray, near enough to be seen. */
     public static final EffectType TYPE = EffectType.builder("water.spray").maxDistance(4000).maxInstances(512)
@@ -49,10 +53,11 @@ public final class WaterSpray {
     /** Water breaking up as it falls: streaks turning into drifting drops, from a sphere {@code radius} metres round. */
     @AllowAllocation("effect data, made as falls are placed")
     public static EffectData falling(float radius) {
-        return EffectData.builder(TYPE).parameter(RATE, 60).parameter(SPEED, 20)
+        return EffectData.builder(TYPE).parameter(RATE, 60).parameter(SPEED, 20).parameter(WIND_X, 0)
+            .parameter(WIND_Z, 0)
             .emitter("streaks", e -> e.capacity(4096).spawn(Spawn.rate(Bind.param(RATE)))
                 .init(Shape.sphere(Math.max(radius, 0.1f)), Init.lifetime(Bind.random(1.2f, 2.4f)),
-                    Init.velocity(Bind.random(-0.6f, 0.6f), Bind.param(SPEED).times(-0.8f), Bind.random(-0.6f, 0.6f)),
+                    Init.velocity(Bind.param(WIND_X), Bind.param(SPEED).times(-0.8f), Bind.param(WIND_Z)),
                     Init.size(Bind.random(0.25f, 0.6f)), Init.color(Bind.color(0.92f, 0.95f, 0.97f, 0.5f)))
                 .update(Forces.gravity(Bind.constant(0.6f)), Forces.drag(0.35f), Forces.curl(0.6f, 0.15f),
                     Forces.wind(0.5f),
@@ -67,15 +72,16 @@ public final class WaterSpray {
     /** Spray thrown up and spreading where a fall lands, from a disc {@code radius} metres round. */
     @AllowAllocation("effect data, made as falls are placed")
     public static EffectData plunge(float radius) {
-        return EffectData.builder(TYPE).parameter(RATE, 30)
+        return EffectData.builder(TYPE).parameter(RATE, 30).parameter(WIND_X, 0).parameter(WIND_Z, 0)
             .emitter("puffs", e -> e.capacity(4096).spawn(Spawn.rate(Bind.param(RATE)))
                 .init(Shape.disc(Math.max(radius, 0.1f)), Init.lifetime(Bind.random(3f, 6f)),
-                    Init.velocity(Bind.random(-2.5f, 2.5f), Bind.random(0.5f, 3.5f), Bind.random(-2.5f, 2.5f)),
-                    Init.size(Bind.random(1.5f, 4f)), Init.randomRotation(),
-                    Init.color(Bind.color(0.9f, 0.93f, 0.95f, 0.35f)))
+                    Init.speed(Bind.random(1f, 4f)), Init.velocity(Bind.param(WIND_X), Bind.random(1.5f, 5f),
+                        Bind.param(WIND_Z)),
+                    Init.size(Bind.random(3f, 8f)), Init.randomRotation(),
+                    Init.color(Bind.color(0.92f, 0.94f, 0.96f, 0.3f)))
                 .update(Forces.gravity(Bind.constant(0.05f)), Forces.drag(0.5f), Forces.curl(1.2f, 0.08f),
                     Forces.wind(0.9f),
-                    Over.size(FloatCurve.of(0, 0.5f, 1, 3.5f)),
+                    Over.size(FloatCurve.of(0, 0.5f, 1, 4f)),
                     Over.color(ColorGradient.builder().linear(0, 1, 1, 1, 0).linear(0.15f, 1, 1, 1, 0.55f)
                         .linear(1, 1, 1, 1, 0).build()))
                 .render(Renderer.billboard(Renderer.Facing.POSITION).set("soft", 2f)

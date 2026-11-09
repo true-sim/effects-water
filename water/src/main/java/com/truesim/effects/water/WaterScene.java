@@ -174,6 +174,11 @@ public final class WaterScene implements AutoCloseable {
         double perCubic = settings.get(WaterRenderSettings.SPRAY_RATE);
         double max = settings.get(WaterRenderSettings.MAX_SPRAY);
         double min = settings.get(WaterRenderSettings.MIN_SPRAY);
+        double to = com.truesim.common.math.Maths.toRadians(settings.get(WaterRenderSettings.WIND_DIRECTION));
+        float wind = settings.get(WaterRenderSettings.WIND_SPEED);
+        float windX = (float) (wind * com.truesim.common.math.Maths.sin(to));
+        float windZ = (float) (-wind * com.truesim.common.math.Maths.cos(to));
+        double reach = settings.get(WaterRenderSettings.PLUNGE_REACH) * fall.height();
         List<Waterfall.Spray> sources = fall.spray();
         for (int k = 0; k < sources.size(); k++) {
             Waterfall.Spray s = sources.get(k);
@@ -181,9 +186,12 @@ public final class WaterScene implements AutoCloseable {
             float rate = (float) Math.clamp(s.rate() * perCubic, min, max);
             long node = child();
             scene.setTranslation(node, s.x(), s.y(), s.z());
-            float radius = (float) Math.max(0.5, s.radius());
+            float radius = (float) Math.max(0.5, plunge ? Math.max(s.radius(), reach) : s.radius());
+            if (plunge) {
+                rate = (float) Math.min(max * 4, rate * 4);
+            }
             Effect effect = effects.play(plunge ? WaterSpray.plunge(radius) : WaterSpray.falling(radius), node)
-                .set(WaterSpray.RATE, rate);
+                .set(WaterSpray.RATE, rate).set(WaterSpray.WIND_X, windX).set(WaterSpray.WIND_Z, windZ);
             if (!plunge) {
                 effect.set(WaterSpray.SPEED, (float) s.speed());
             }
@@ -202,10 +210,13 @@ public final class WaterScene implements AutoCloseable {
             return;
         }
         long node = child();
-        scene.setTranslation(node, m.x(), m.y(), m.z());
-        scene.components().set(node, FogVolume.TYPE, FogVolume.ellipsoid(new Vec3(m.radiusX(), m.radiusY(),
-            m.radiusZ()), density).withFalloff((float) m.falloff())
-            .withBlendDistance((float) (0.9 * Math.min(m.radiusX(), m.radiusY()))));
+        // centred at the foot, reaching as high again as the network says: thinning upward, its edge faded all the
+        // way in, so no shell shows from close by
+        double radiusY = 2 * m.radiusY();
+        scene.setTranslation(node, m.x(), m.y() - 0.5 * m.radiusY(), m.z());
+        scene.components().set(node, FogVolume.TYPE, FogVolume.ellipsoid(new Vec3(1.3 * m.radiusX(), radiusY,
+            1.3 * m.radiusZ()), density).withFalloff((float) (2.5 / radiusY))
+            .withBlendDistance((float) Math.min(1.3 * m.radiusX(), radiusY)));
     }
 
     @AllowAllocation("placing a network, once")
